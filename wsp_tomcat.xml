@@ -1,0 +1,241 @@
+<!-- Change History -->
+
+<!-- 09/08/2015  Dharmendra Kumar  Added CloneEnv target to create new env -->
+<!-- 09/02/2015  Dharemndra Kumar  Added command to kill processes after stop tomcat -->
+<!-- 08/24/2015  Dharmendra Kumar  Added Purge Backup code and keep only 5 backups -->
+<!-- 08/23/2015  Dharemndra Kumar  Added ApplyCustomSteps target -->
+<!-- 08/20/2015  Dharmendra Kumar  Changed the format of DeployDir variable to make it more generic -->
+<!-- 08/16/2015  Dharmendra Kumar  Added code to perform deployment in tomcat -->
+<!-- 07/16/2015  Dharmendra Kumar  Initial script to perform Start and Stop Environments -->
+
+<!-- Rev 1.6 -->
+<project name="WSFPAutoDeploy" default="StopEnv" basedir="..">
+        <taskdef name="purge" classname="com.dallaway.ant.Purge"/>
+        <taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+        <property file="cfg/wsp-tomcat.cfg"/>
+        <property name="WSFPWar" value="planningstation.war"/>
+        <property name="sleepsec" value="60" />
+        <property name="tempdirtoclean" value="temp,logs,work"/>
+        <property name="CopytxtxmlDir" value=""/>
+        <property name="SetlogtodebugDir" value=""/>
+        <property name="backupcount" value="5"/>
+
+        <tstamp>
+                <format property="TimeStamp" pattern="yyyyMMdd-HHmm"/>
+        </tstamp>
+        <echo message="Timestamp : ${TimeStamp}"/>
+
+        <target name="StopEnv">
+                <for list="${appserver}" param="apps">
+                        <sequential>
+                                <exec executable="/data/@{apps}/bin/catalina.sh" failonerror="false">
+                                        <arg value="stop" />
+                                </exec>
+                                <sleep seconds="${sleepsec}" />
+                                <exec executable="/bin/sh">
+                                        <arg value="-c" />
+                                        <arg value="ps -ef | grep java | grep @{apps} | grep -v ant | awk &apos;{print $2}&apos; | xargs kill -9"/>
+                                </exec>
+                                <echo message="Stop of @{apps} completed" />
+                        </sequential>
+                </for>
+        </target>
+
+        <target name="StartEnv">
+                <for list="${appserver}" param="apps">
+                        <sequential>
+                                <exec executable="/data/@{apps}/bin/catalina.sh" failonerror="false">
+                                    <arg value="start" />
+                                </exec>
+                                <!--sleep seconds="${sleepsec}"/-->
+                                <echo message="Start of @{apps} completed" />
+                        </sequential>
+                </for>
+        </target>
+
+        <target name="RestartEnv" depends="StopEnv, StartEnv">
+                <echo message="Restart of Environment Complete..!"/>
+        </target>
+
+        <target name="BackupCurrDeployment">
+                <for list="${DeployDir}" param="appserver-croot">
+                        <sequential>
+                                <var name="d-appserver" unset="true" />
+                                <for list="@{appserver-croot}" delimiter=":" param="d-value" >
+                                        <sequential>
+                                                <var name="d-croot" unset="true" />
+                                                <property name="d-appserver" value="@{d-value}" />
+                                                <property name="d-croot" value="@{d-value}" />
+                                        </sequential>
+                                </for>
+                                <move todir="/data/${d-appserver}/apps/${d-croot}-${TimeStamp}" preservelastmodified="true">
+                                        <fileset dir="/data/${d-appserver}/apps/${d-croot}"/>
+                                </move>
+                        </sequential>
+                </for>
+        </target>
+
+        <target name="CopyExtractLatestWar">
+                <copy file="${WarSourcePath}/${WSFPWar}" todir="${WarDestPath}" preservelastmodified="true"/>
+                <for list="${DeployDir}" param="appserver-croot">
+                        <sequential>
+                                <var name="d-appserver" unset="true" />
+                                <for list="@{appserver-croot}" delimiter=":" param="d-value" >
+                                        <sequential>
+                                                <var name="d-croot" unset="true" />
+                                                <property name="d-appserver" value="@{d-value}" />
+                                                <property name="d-croot" value="@{d-value}" />
+                                        </sequential>
+                                </for>
+                                <unwar src="${WarDestPath}/${WSFPWar}" dest="/data/${d-appserver}/apps/${d-croot}"/>
+                                <copy file="/data/${d-appserver}/apps/${d-croot}-${TimeStamp}/WEB-INF/lib/config.properties" todir="/data/${d-appserver}/apps/${d-croot}/WEB-INF/lib" preservelastmodified="true" overwrite="true"/>
+                                <move file="/data/${d-appserver}/apps/${d-croot}-${TimeStamp}" todir="backup/${d-croot}"/>
+                                <replaceregexp file="/data/${d-appserver}/apps/${d-croot}/WEB-INF/spring/application.properties"
+                                        match="httpsEnabled=false"
+                                        replace="httpsEnabled=true"
+                                        byline="true"
+                                />
+                                <for list="${tempdirtoclean}" param="tempdir">
+                                        <sequential>
+                                                <delete includeemptydirs="true" failonerror="false">
+                                                        <fileset dir="/data/${d-appserver}/@{tempdir}">
+                                                                <include name="**/*" />
+                                                        </fileset>
+                                                </delete>
+                                        </sequential>
+                                </for>
+                                <for param="backup">
+                                <path>
+                                        <dirset dir="backup/${d-croot}" includes="${d-croot}-*" excludes="*.tar"/>
+                                </path>
+                                <sequential>
+                                        <echo> Compressing @{backup} </echo>
+                                        <delete file="@{backup}.tar"/>
+                                        <tar destfile="@{backup}.tar" basedir="@{backup}"/>
+                                        <delete dir="@{backup}"/>
+                                </sequential>
+                                </for>
+                                <purge keep="${backupcount}">
+                                        <fileset dir="backup/${d-croot}" includes="*.tar"/>
+                                </purge>
+                        </sequential>
+                </for>
+        </target>
+
+        <target name="Deploy" depends="StopEnv, BackupCurrDeployment, CopyExtractLatestWar, ApplyCustomSteps, StartEnv">
+                <move file="${WarDestPath}/${WSFPWar}" tofile="${WarDestPath}/${WSFPWar}.deployed"/>
+        </target>
+
+        <target name="ApplyCustomSteps">
+        <for list="${CopytxtxmlDir}" param="appserver-croot">
+                 <sequential>
+                        <var name="d-appserver" unset="true" />
+                        <for list="@{appserver-croot}" delimiter=":" param="d-value" >
+                                <sequential>
+                                        <var name="d-croot" unset="true" />
+                                        <property name="d-appserver" value="@{d-value}" />
+                                        <property name="d-croot" value="@{d-value}" />
+                                </sequential>
+                        </for>
+                        <copy todir="/data/${d-appserver}/apps/${d-croot}" overwrite="true" preservelastmodified="true">
+                                <fileset dir="/data/${d-appserver}/apps/txtxmlfiles">
+                                        <include name="*.txt"/>
+                                        <include name="*.xml"/>
+                                </fileset>
+                        </copy>
+                </sequential>
+        </for>
+        <for list="${SetlogtodebugDir}" param="appserver-croot">
+                 <sequential>
+                        <var name="d-appserver" unset="true" />
+                        <for list="@{appserver-croot}" delimiter=":" param="d-value" >
+                                <sequential>
+                                        <var name="d-croot" unset="true" />
+                                        <property name="d-appserver" value="@{d-value}" />
+                                        <property name="d-croot" value="@{d-value}" />
+                                </sequential>
+                        </for>
+                        <unjar src="/data/${d-appserver}/apps/${d-croot}/WEB-INF/lib/properties.jar" dest="jar/${d-croot}">
+                                <patternset>
+                                        <include name="log4j.properties"/>
+                                </patternset>
+                        </unjar>
+                        <replaceregexp file="jar/${d-croot}/log4j.properties"
+                                match="log4j.logger.system=INFO"
+                                replace="log4j.logger.system=DEBUG"
+                                byline="true"
+                        />
+                        <replaceregexp file="jar/${d-croot}/log4j.properties"
+                                match="log4j.logger.sungard.expert=INFO"
+                                replace="log4j.logger.sungard.expert=DEBUG"
+                                byline="true"
+                        />
+                        <jar destfile="/data/${d-appserver}/apps/${d-croot}/WEB-INF/lib/properties.jar" update="true">
+                                <fileset dir="jar/${d-croot}" includes="log4j.properties"/>
+                        </jar>
+                </sequential>
+        </for>
+        </target>
+
+        <target name="WSFPDeploy">
+                <echo message="Comparing timestamp of war." />
+                <uptodate targetfile="${WarDestPath}/${WSFPWar}.deployed" srcfile="${WarSourcePath}/${WSFPWar}" property="WarUpToDate"/>
+
+                <if>
+                <equals arg1="${WarUpToDate}" arg2="true"/>
+                <then>
+                        <echo message="Target is Up-To-Date, Skipping Deployment." />
+                </then>
+                <else>
+                        <antcall target="Deploy" />
+                </else>
+                </if>
+        </target>
+
+        <target name="CloneEnv">
+                <echo message="NOTE : Cloning existing environment."/>
+                <input message="Provide the source appsever name, [Ex:appserver1]:" addproperty="sourceappserver"/>
+                <input message="Provide the target appsever name, [Ex:appserver1]:" addproperty="targetappserver"/>
+
+                <fileset id="noofcontext" dir="/data/${targetappserver}/conf/Catalina/localhost" includes="*.xml"/>
+                <property name="prop.noofcontext" refid="noofcontext"/>
+                <echo message="Active application context under ${sourceappserver} are : ${prop.noofcontext}"/>
+
+                <input message="Provide the source application context, [Ex:mssql-513-1507-p4]:" addproperty="sourcecontext"/>
+                <input message="Provide the target application context, [Ex:mssql-513-1507-p5]:" addproperty="targetcontext"/>
+
+                <antcall target="StopEnv">
+                        <param name="appserver" value="${targetappserver}"/>
+                </antcall>
+                <copy file="/data/${sourceappserver}/conf/Catalina/localhost/${sourcecontext}.xml" tofile="/data/${targetappserver}/conf/Catalina/localhost/${targetcontext}.xml" preservelastmodified="true"/>
+                <copy todir="/data/${targetappserver}/apps/${targetcontext}">
+                        <fileset dir="/data/${sourceappserver}/apps/${sourcecontext}"/>
+                </copy>
+
+                <input message="Do you want to disable any instance, [Y/N]:" addproperty="disablecontext"/>
+                <if>
+                <equals arg1="${disablecontext}" arg2="Y"/>
+                <then>
+                        <input message="Prove application context name to disable, [Ex:mssql-513-1507-p4]" addproperty="disablecontextname"/>
+                        <mkdir dir="/data/${targetappserver}/conf/Catalina/localhost/old"/>
+                        <move file="/data/${targetappserver}/conf/Catalina/localhost/${disablecontextname}.xml" todir="/data/${targetappserver}/conf/Catalina/localhost/old" />
+                </then>
+                </if>
+
+                <replaceregexp file="/data/${targetappserver}/conf/Catalina/localhost/${targetcontext}.xml"
+                        match="${sourcecontext}"
+                        replace="${targetcontext}"
+                        flags="g"
+                />
+
+                <replaceregexp file="/data/${targetappserver}/apps/${targetcontext}/WEB-INF/lib/config.properties"
+                        match="${sourcecontext}"
+                        replace="${targetcontext}"
+                        flags="g"
+                />
+
+                <antcall target="StartEnv">
+                        <param name="appserver" value="${targetappserver}"/>
+                </antcall>
+        </target>
+</project>
