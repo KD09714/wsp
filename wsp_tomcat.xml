@@ -1,5 +1,6 @@
 <!-- Change History -->
 
+<!-- 11/22/2015  Dharmendra Kumar  Keep a master copy of config.properties -->
 <!-- 10/04/2015  Dharmendra Kumar  Make debug optional
 				   Add Remote Clone of Environments -->
 <!-- 09/08/2015  Dharmendra Kumar  Added logging -->
@@ -11,7 +12,7 @@
 <!-- 08/16/2015  Dharmendra Kumar  Added code to perform deployment in tomcat -->
 <!-- 07/16/2015  Dharmendra Kumar  Initial script to perform Start and Stop Environments -->
 
-<!-- Rev 1.8 -->
+<!-- Rev 1.9 -->
 <project name="WSFPAutoDeploy" default="StopEnv" basedir="..">
 	<taskdef name="purge" classname="com.dallaway.ant.Purge"/>
 	<taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
@@ -81,6 +82,7 @@
 						<property name="d-croot" value="@{d-value}" />
 					</sequential>
 				</for>
+				<mkdir dir="/data/${d-appserver}/apps/${d-croot}" />
 				<move todir="/data/${d-appserver}/apps/${d-croot}-${TimeStamp}" preservelastmodified="true">
 					<fileset dir="/data/${d-appserver}/apps/${d-croot}"/>
 				</move>
@@ -101,7 +103,14 @@
                                         </sequential>
                                 </for>
 				<unwar src="${WarDestPath}/${WSFPWar}" dest="/data/${d-appserver}/apps/${d-croot}"/>
-				<copy file="/data/${d-appserver}/apps/${d-croot}-${TimeStamp}/WEB-INF/lib/config.properties" todir="/data/${d-appserver}/apps/${d-croot}/WEB-INF/lib" preservelastmodified="true" overwrite="true"/>
+				<if>
+				<available file="cfg/master/${d-appserver}/${d-croot}/config.properties" />
+				<else>
+					<copy file="/data/${d-appserver}/apps/${d-croot}-${TimeStamp}/WEB-INF/lib/config.properties" todir="cfg/master/${d-appserver}/${d-croot}" preservelastmodified="true" />
+				</else>
+				</if>
+
+				<copy file="cfg/master/${d-appserver}/${d-croot}/config.properties" todir="/data/${d-appserver}/apps/${d-croot}/WEB-INF/lib" preservelastmodified="true" overwrite="true"/>
 				<move file="/data/${d-appserver}/apps/${d-croot}-${TimeStamp}" todir="backup/${d-croot}"/>
 		
                         	<replaceregexp file="/data/${d-appserver}/apps/${d-croot}/WEB-INF/spring/application.properties"
@@ -184,6 +193,12 @@
                                 replace="log4j.logger.sungard.expert=DEBUG"
                                 byline="true"
                         />
+                        <replaceregexp file="jar/${d-croot}/log4j.properties"
+                                match="log4j.logger.calc=INFO"
+                                replace="log4j.logger.calc=DEBUG"
+                                byline="true"
+                        />
+
 		 	<jar destfile="/data/${d-appserver}/apps/${d-croot}/WEB-INF/lib/properties.jar" update="true">
 				<fileset dir="jar/${d-croot}" includes="log4j.properties"/>
 			</jar>
@@ -276,4 +291,3 @@
 		<echo message=" NOTE : Please review the /data/${targetappserver}/apps/${targetcontext}/WEB-INF/lib/config.properties once ....!!"/>
 	</target>
 </project>
-
